@@ -1,0 +1,2 @@
+# Install as /etc/sudoers.d/beacon-deploy (no dot in the name, or sudo ignores it), mode 440.
+deploy ALL=(root) NOPASSWD: /usr/local/sbin/beacon-deploy
