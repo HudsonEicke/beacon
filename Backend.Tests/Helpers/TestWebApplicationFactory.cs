@@ -35,6 +35,7 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IAsyncL
         {
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
+                ["ConnectionStrings:MessagingAppContext"] = connectionString,
                 ["JwtSettings:SecretKey"] = TestJwtKey,
                 ["JwtSettings:Issuer"] = TestJwtIssuer,
                 ["JwtSettings:Audience"] = TestJwtAudience,
@@ -49,8 +50,8 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IAsyncL
 
         builder.ConfigureTestServices(services =>
         {
-            // Program reads the connection string while it registers the DbContext, before these settings apply, so it's replaced here;
-            // UseNpgsql keeps the enum mappings Program set up
+            // Program reads the connection string while it registers the DbContext, before the settings above apply, so it's replaced here
+            // too (the migration runs after Build, so it sees them); UseNpgsql keeps the enum mappings Program set up
             services.ConfigureDbContext<MessagingAppContext>(options => options.UseNpgsql(connectionString));
 
             services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)

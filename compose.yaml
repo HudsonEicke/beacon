@@ -13,14 +13,11 @@ services:
     logging: *default-logging
     environment:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=messaging_app
     volumes:
       - type: volume
         source: database-data
         target: /var/lib/postgresql/data
-      - type: bind
-        source: ./Database/messagingapp.sql
-        target: /docker-entrypoint-initdb.d/messagingapp.sql
-        read_only: true
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "postgres", "-h", "127.0.0.1"]
       interval: 5s
