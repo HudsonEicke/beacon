@@ -7,6 +7,7 @@ import { CardContent, CardFooter } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/useAuth";
+import type { RegisterRequest } from "@/types";
 import { registerSchema } from "./RegisterForm.schema";
 import type { RegisterFormValues } from "./RegisterForm.schema";
 
@@ -31,7 +32,11 @@ export const RegisterForm = () =>
 
         try
         {
-            const { confirmPassword, ...request } = values;
+            const request: RegisterRequest = {
+                username: values.username,
+                email: values.email,
+                password: values.password
+            };
             await registerUser(request);
             navigate("/channels/@me");
         }
