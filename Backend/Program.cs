@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Messaging_App.Hubs;
 using Microsoft.AspNetCore.HttpOverrides;
 using System.Threading.RateLimiting;
+using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -28,6 +29,7 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 });
 
 builder.Services.AddOptions<CleanupSettings>().Bind(builder.Configuration.GetSection("CleanupSettings")).ValidateDataAnnotations().ValidateOnStart();
+builder.Services.AddOptions<RateLimitSettings>().Bind(builder.Configuration.GetSection("RateLimitSettings")).ValidateDataAnnotations().ValidateOnStart();
 
 string[] allowedOrigins = builder.Configuration.GetSection("AllowedOrigins").Get<string[]>() ?? [];
 
@@ -77,14 +79,18 @@ builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 
-    options.AddPolicy("auth", httpContext => RateLimitPartition.GetFixedWindowLimiter(
-        httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-        partitionKey => new FixedWindowRateLimiterOptions
-        {
-            PermitLimit = 10,
-            Window = TimeSpan.FromMinutes(1)
-        }
-    ));
+    options.AddPolicy("auth", httpContext =>
+    {
+        RateLimitSettings rateLimitSettings = httpContext.RequestServices.GetRequiredService<IOptions<RateLimitSettings>>().Value;
+
+        return RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            partitionKey => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = rateLimitSettings.AuthPermitLimit,
+                Window = TimeSpan.FromMinutes(rateLimitSettings.AuthWindowMinutes)
+            });
+    });
 });
 
 // Add services to the container.
