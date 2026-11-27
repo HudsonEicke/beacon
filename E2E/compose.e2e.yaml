@@ -1,0 +1,18 @@
+# Layered on top of compose.yaml for the E2E tests:
+#   docker compose -f compose.yaml -f E2E/compose.e2e.yaml up -d --build
+# Its own project name, images and volumes, so it never touches a normal local stack or its data.
+name: beacon-e2e
+
+services:
+  api:
+    image: beacon-api:e2e
+    environment:
+      # every test registers its users from the same IP
+      - RateLimitSettings__AuthPermitLimit=10000
+  web:
+    image: beacon-web:e2e
+    environment:
+      # never the real domain from .env, which would make Caddy ask Let's Encrypt for a certificate
+      - DOMAIN=http://localhost
+    ports: !override
+      - "80:80"
