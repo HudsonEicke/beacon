@@ -12,6 +12,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import PasswordInput from '@/components/PasswordInput';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { DISPLAY_NAME_MAX_LENGTH, PASSWORD_MAX_LENGTH, PROFILE_IMAGE_URL_MAX_LENGTH, isValidAvatarUrl, passwordSchema, profileSchema } from './UserSettingsDialog.schema';
@@ -212,9 +213,8 @@ const PasswordForm = () =>
         <form onSubmit={handleSubmit(submit)} noValidate className="flex flex-col gap-4 pt-2">
             <div className="grid gap-2">
                 <Label htmlFor="settings-current-password">Current password</Label>
-                <Input
+                <PasswordInput
                     id="settings-current-password"
-                    type="password"
                     autoComplete="current-password"
                     maxLength={PASSWORD_MAX_LENGTH}
                     aria-invalid={!!errors.currentPassword}
@@ -225,9 +225,8 @@ const PasswordForm = () =>
 
             <div className="grid gap-2">
                 <Label htmlFor="settings-new-password">New password</Label>
-                <Input
+                <PasswordInput
                     id="settings-new-password"
-                    type="password"
                     autoComplete="new-password"
                     maxLength={PASSWORD_MAX_LENGTH}
                     aria-invalid={!!errors.newPassword}
@@ -238,9 +237,8 @@ const PasswordForm = () =>
 
             <div className="grid gap-2">
                 <Label htmlFor="settings-confirm-password">Confirm new password</Label>
-                <Input
+                <PasswordInput
                     id="settings-confirm-password"
-                    type="password"
                     autoComplete="new-password"
                     maxLength={PASSWORD_MAX_LENGTH}
                     aria-invalid={!!errors.confirmPassword}

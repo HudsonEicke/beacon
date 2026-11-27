@@ -22,7 +22,7 @@ test('logs in, logs out, and needs to log in again to get back in', async ({ pag
 
     await page.goto('/login');
     await page.getByLabel('Username').fill(user.username);
-    await page.getByLabel('Password').fill(user.password);
+    await page.getByLabel('Password', { exact: true }).fill(user.password);
     await page.getByRole('button', { name: 'Login' }).click();
     await expect(page).toHaveURL('/channels/@me');
 
@@ -39,7 +39,7 @@ test('refuses a wrong password', async ({ page, createUser }) =>
 
     await page.goto('/login');
     await page.getByLabel('Username').fill(user.username);
-    await page.getByLabel('Password').fill('not-the-password');
+    await page.getByLabel('Password', { exact: true }).fill('not-the-password');
     await page.getByRole('button', { name: 'Login' }).click();
 
     await expect(page.getByText('Invalid username or password')).toBeVisible();

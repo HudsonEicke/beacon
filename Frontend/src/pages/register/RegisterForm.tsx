@@ -5,6 +5,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { CardContent, CardFooter } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import PasswordInput from "@/components/PasswordInput";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/useAuth";
 import type { RegisterRequest } from "@/types";
@@ -87,14 +88,14 @@ export const RegisterForm = () =>
                     </div>
                     <div className="grid gap-2">
                         <Label htmlFor="password">Password</Label>
-                        <Input id="password" type="password" autoComplete="new-password" aria-invalid={!!errors.password} {...register("password")}/>
+                        <PasswordInput id="password" autoComplete="new-password" aria-invalid={!!errors.password} {...register("password")}/>
                         {errors.password && (
                             <p className="text-sm text-destructive">{errors.password.message}</p>
                         )}
                     </div>
                     <div className="grid gap-2">
                         <Label htmlFor="confirmPassword">Confirm Password</Label>
-                        <Input id="confirmPassword" type="password" autoComplete="new-password" aria-invalid={!!errors.confirmPassword} {...register("confirmPassword")}/>
+                        <PasswordInput id="confirmPassword" autoComplete="new-password" aria-invalid={!!errors.confirmPassword} {...register("confirmPassword")}/>
                         {errors.confirmPassword && (
                             <p className="text-sm text-destructive">{errors.confirmPassword.message}</p>
                         )}
