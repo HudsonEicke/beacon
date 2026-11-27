@@ -6,6 +6,9 @@
 # dotenv files
 .env
 
+# the commit the server is running, written by deploy/beacon-deploy.sh
+release.env
+
 # User-specific files
 *.rsuser
 *.suo

@@ -1,14 +1,7 @@
 name: E2E
 
 on:
-  push:
-    branches: [ "main" ]
-    paths:
-      - "Backend/**"
-      - "Frontend/**"
-      - "E2E/**"
-      - "compose.yaml"
-      - ".github/workflows/e2e.yml"
+  workflow_call:
   pull_request:
     branches: [ "main" ]
     paths:
