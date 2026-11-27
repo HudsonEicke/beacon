@@ -35,7 +35,8 @@ public class DatabaseCleanupService : BackgroundService
         while(await timer.WaitForNextTickAsync(stoppingToken));
     }
 
-    private async Task RunCleanup(CancellationToken stoppingToken)
+    //internal so tests can run one pass without waiting for the timer
+    internal async Task RunCleanup(CancellationToken stoppingToken)
     {
         try
         {
