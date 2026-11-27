@@ -28,11 +28,11 @@ const connection = new HubConnectionBuilder()
     .build();
 
 // registered before the first start so no early event is missed
-registerChannelEvents(connection);
-registerServerEvents(connection);
-registerConversationEvents(connection);
-registerUserEvents(connection);
-registerFriendEvents(connection);
+registerChannelEvents(connection, store);
+registerServerEvents(connection, store);
+registerConversationEvents(connection, store);
+registerUserEvents(connection, store);
+registerFriendEvents(connection, store);
 
 // what the app currently wants; queued tasks check it when they run, so a stop followed by a start cancels out
 let isWanted = false;

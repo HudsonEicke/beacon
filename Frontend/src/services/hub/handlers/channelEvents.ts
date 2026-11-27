@@ -1,10 +1,10 @@
 import type { HubConnection } from '@microsoft/signalr';
-import { store } from '@/store/store';
+import type { AppStore } from '@/store/store';
 import { channelCreated, channelDeleted, channelMessageDeleted, channelMessageEdited, channelMessageReceived, channelReadStateUpdated, channelsReordered, channelUpdated } from '@/store/hubEvents';
 import { markChannelRead } from '@/store/channelSlice';
 import { onHubEvent } from '@/services/hub/events';
 
-export const registerChannelEvents = (connection: HubConnection) =>
+export const registerChannelEvents = (connection: HubConnection, store: AppStore) =>
 {
     onHubEvent(connection, 'ReceiveChannelMessage', (serverID, channelID, message) =>
     {

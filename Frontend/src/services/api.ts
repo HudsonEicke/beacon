@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { store } from '@/store/store';
+import type { AppStore } from '@/store/store';
 import { setTokens, clearTokens } from '@/store/authSlice';
 import type { AuthResponse } from '@/types';
 import { isTokenExpiring } from '@/lib/jwt';
@@ -9,6 +9,13 @@ const TOKEN_REFRESH_MARGIN_MS = 30_000;
 const api = axios.create({
     baseURL: import.meta.env.VITE_API_URL,
 });
+
+// passed in rather than imported, so the store can import the services without a circular import, and tests can use their own store
+let store: AppStore;
+
+export const injectStore = (appStore: AppStore) => {
+    store = appStore;
+};
 
 api.interceptors.request.use((config) => {
     const token = store.getState().auth.accessToken;
