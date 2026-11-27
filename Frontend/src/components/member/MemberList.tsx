@@ -1,9 +1,10 @@
+import { useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { AtSign, Crown, MessageCircle, RotateCw, User, UserMinus, UserPlus } from 'lucide-react';
+import { AtSign, Ban, Crown, MessageCircle, RotateCw, User, UserMinus, UserPlus } from 'lucide-react';
 import type { UserResponse } from '@/types';
 import { ActivityStatus } from '@/types';
 import type { AppDispatch, RootState } from '@/store/store';
-import { sendFriendRequest } from '@/store/friendSlice';
+import { sendFriendRequest, unblockUser } from '@/store/friendSlice';
 import { useOpenDirectMessage } from '@/hooks/useOpenDirectMessage';
 import { cn, copyToClipboard } from '@/lib/utils';
 import { byDisplayName } from '@/lib/userSort';
@@ -12,6 +13,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import StatusBadge from '@/components/user/StatusBadge';
+import FriendActionDialog from '@/components/friend/FriendActionDialog';
 
 interface MemberListProps
 {
@@ -114,6 +116,8 @@ const MemberRow = ({ member, isOwner, onKick }: MemberRowProps) =>
     // an incoming request still shows Add Friend, since sending one back accepts it
     const canAddFriend = useSelector((state: RootState) =>
         ![state.friend.friends, state.friend.outgoingRequests, state.friend.blockedUsers].some(users => users.some(user => user.username === member.username)));
+    const isBlocked = useSelector((state: RootState) => state.friend.blockedUsers.some(user => user.username === member.username));
+    const [isBlockDialogOpen, setIsBlockDialogOpen] = useState(false);
     const isOffline = member.activityStatus === ActivityStatus.offline;
     const isSelf = member.username === currentUsername;
 
@@ -135,64 +139,93 @@ const MemberRow = ({ member, isOwner, onKick }: MemberRowProps) =>
         dispatch(sendFriendRequest(member.username));
     };
 
+    const unblock = () =>
+    {
+        dispatch(unblockUser(member.username));
+    };
+
     return (
-        <ContextMenu>
-            <ContextMenuTrigger asChild>
-                <li title={`${member.displayName} (${member.username})`} className={cn('flex items-center gap-3 rounded-md px-2 py-1.5 hover:bg-sidebar-accent/50 @max-2xl:justify-center', isOffline && 'opacity-50 hover:opacity-100')}>
-                    <Avatar className="size-8 shrink-0">
-                        <AvatarImage src={member.profileImageUrl || undefined} alt="" />
-                        <AvatarFallback><User className="size-4" aria-hidden="true" /></AvatarFallback>
-                        <StatusBadge status={member.activityStatus} />
-                    </Avatar>
+        <>
+            {/* non-modal so the menu closing doesn't fight the block dialog it opens for focus */}
+            <ContextMenu modal={false}>
+                <ContextMenuTrigger asChild>
+                    <li title={`${member.displayName} (${member.username})`} className={cn('flex items-center gap-3 rounded-md px-2 py-1.5 hover:bg-sidebar-accent/50 @max-2xl:justify-center', isOffline && 'opacity-50 hover:opacity-100')}>
+                        <Avatar className="size-8 shrink-0">
+                            <AvatarImage src={member.profileImageUrl || undefined} alt="" />
+                            <AvatarFallback><User className="size-4" aria-hidden="true" /></AvatarFallback>
+                            <StatusBadge status={member.activityStatus} />
+                        </Avatar>
 
-                    <span className="min-w-0 flex-1 truncate text-sm @max-2xl:sr-only">{member.displayName}</span>
+                        <span className="min-w-0 flex-1 truncate text-sm @max-2xl:sr-only">{member.displayName}</span>
 
+                        {
+                            isOwner && (
+                                <span title="Owner" className="shrink-0 @max-2xl:sr-only">
+                                    <Crown className="size-3.5 text-amber-500" fill="currentColor" aria-hidden="true" />
+                                    <span className="sr-only">Owner</span>
+                                </span>
+                            )
+                        }
+                    </li>
+                </ContextMenuTrigger>
+
+                <ContextMenuContent className="w-48">
                     {
-                        isOwner && (
-                            <span title="Owner" className="shrink-0 @max-2xl:sr-only">
-                                <Crown className="size-3.5 text-amber-500" fill="currentColor" aria-hidden="true" />
-                                <span className="sr-only">Owner</span>
-                            </span>
+                        !isSelf && (
+                            <ContextMenuItem onSelect={openDirectMessage}>
+                                <MessageCircle aria-hidden="true" />
+                                Message
+                            </ContextMenuItem>
                         )
                     }
-                </li>
-            </ContextMenuTrigger>
-
-            <ContextMenuContent className="w-48">
-                {
-                    !isSelf && (
-                        <ContextMenuItem onSelect={openDirectMessage}>
-                            <MessageCircle aria-hidden="true" />
-                            Message
-                        </ContextMenuItem>
-                    )
-                }
-                {
-                    !isSelf && canAddFriend && (
-                        <ContextMenuItem onSelect={addFriend}>
-                            <UserPlus aria-hidden="true" />
-                            Add Friend
-                        </ContextMenuItem>
-                    )
-                }
-                <ContextMenuItem onSelect={() => copyToClipboard(member.username)}>
-                    <AtSign aria-hidden="true" />
-                    Copy username
-                </ContextMenuItem>
-                {
-                    // the owner is the only one who sees this, and can't kick themselves
-                    onKick && !isSelf && (
-                        <>
-                            <ContextMenuSeparator />
-                            <ContextMenuItem variant="destructive" onSelect={() => onKick(member)}>
-                                <UserMinus aria-hidden="true" />
-                                Kick
+                    {
+                        !isSelf && canAddFriend && (
+                            <ContextMenuItem onSelect={addFriend}>
+                                <UserPlus aria-hidden="true" />
+                                Add Friend
                             </ContextMenuItem>
-                        </>
-                    )
-                }
-            </ContextMenuContent>
-        </ContextMenu>
+                        )
+                    }
+                    <ContextMenuItem onSelect={() => copyToClipboard(member.username)}>
+                        <AtSign aria-hidden="true" />
+                        Copy username
+                    </ContextMenuItem>
+                    {
+                        !isSelf && (
+                            <>
+                                <ContextMenuSeparator />
+                                {
+                                    isBlocked
+                                        ? (
+                                            <ContextMenuItem onSelect={unblock}>
+                                                <Ban aria-hidden="true" />
+                                                Unblock
+                                            </ContextMenuItem>
+                                        )
+                                        : (
+                                            <ContextMenuItem variant="destructive" onSelect={() => setIsBlockDialogOpen(true)}>
+                                                <Ban aria-hidden="true" />
+                                                Block
+                                            </ContextMenuItem>
+                                        )
+                                }
+                                {
+                                    // the owner is the only one who sees this, and can't kick themselves
+                                    onKick && (
+                                        <ContextMenuItem variant="destructive" onSelect={() => onKick(member)}>
+                                            <UserMinus aria-hidden="true" />
+                                            Kick
+                                        </ContextMenuItem>
+                                    )
+                                }
+                            </>
+                        )
+                    }
+                </ContextMenuContent>
+            </ContextMenu>
+
+            <FriendActionDialog user={member} action="block" open={isBlockDialogOpen} onOpenChange={setIsBlockDialogOpen} />
+        </>
     );
 };
 
