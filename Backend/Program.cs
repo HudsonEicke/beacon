@@ -112,6 +112,8 @@ builder.Services.AddHostedService<DatabaseCleanupService>();
 
 var app = builder.Build();
 
+app.MigrateDatabase();
+
 app.UseForwardedHeaders();
 
 // Configure the HTTP request pipeline.

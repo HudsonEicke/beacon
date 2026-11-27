@@ -6,7 +6,6 @@ on:
     paths:
       - "Backend/**"
       - "Frontend/**"
-      - "Database/**"
       - "E2E/**"
       - "compose.yaml"
       - ".github/workflows/e2e.yml"
@@ -15,7 +14,6 @@ on:
     paths:
       - "Backend/**"
       - "Frontend/**"
-      - "Database/**"
       - "E2E/**"
       - "compose.yaml"
       - ".github/workflows/e2e.yml"

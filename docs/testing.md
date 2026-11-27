@@ -13,7 +13,7 @@ How to run the tests for each layer of the stack, and how to run all of them bef
 The tests are in `Backend.Tests/`, split in two:
 
 - **Unit tests** (`Unit/`) test single services, such as JWT handling and encryption. They need nothing else.
-- **Integration tests** (`Integration/`) run the API in memory and call its endpoints and the SignalR hub. They start a throwaway `postgres:17` container with Testcontainers and load `Database/messagingapp.sql` into it, so **Docker must be running**. They never touch a real database, and every run starts empty.
+- **Integration tests** (`Integration/`) run the API in memory and call its endpoints and the SignalR hub. They start a throwaway `postgres:17` container with Testcontainers, and the API runs the migrations against it on startup, so **Docker must be running**. They never touch a real database, and every run starts empty.
 
 ### Run the tests
 
