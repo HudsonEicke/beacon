@@ -32,6 +32,11 @@ const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
 
+// the cap goes on the viewport, which is what scrolls; on the root the list just spills out of the dialog
+// the padding keeps the buttons clear of the scrollbar, which Radix draws over the content
+// Radix wraps the content in a display: table div, which stops long names from truncating
+const SCROLL_LIST_CLASS_NAME = '[&_[data-slot=scroll-area-viewport]]:max-h-80 [&_[data-slot=scroll-area-viewport]]:pr-3 [&_[data-slot=scroll-area-viewport]>div]:block!';
+
 const relativeTime = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
 
 const isInviteUsedUp = (invite: InviteResponse) => invite.maxUses !== null && invite.uses >= invite.maxUses;
@@ -404,7 +409,7 @@ const InvitesTab = ({ serverId }: { serverId: number }) =>
         <div className="flex flex-col gap-2 pt-2">
             {actionError && <p role="alert" className="text-sm text-destructive">{actionError}</p>}
 
-            <ScrollArea className="max-h-80 [&_[data-slot=scroll-area-viewport]>div]:block!">
+            <ScrollArea className={SCROLL_LIST_CLASS_NAME}>
                 <ul className="flex flex-col">
                     {
                         sortedInvites.map(invite =>
@@ -497,7 +502,7 @@ const MembersTab = ({ server }: { server: ServerResponse }) =>
 
     return (
         <div className="pt-2">
-            <ScrollArea className="max-h-80 [&_[data-slot=scroll-area-viewport]>div]:block!">
+            <ScrollArea className={SCROLL_LIST_CLASS_NAME}>
                 <ul className="flex flex-col">
                     {
                         kickableMembers.map(member => (
