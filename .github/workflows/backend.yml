@@ -6,7 +6,6 @@ on:
     paths:
       - "Backend/**"
       - "Backend.Tests/**"
-      - "Database/**"
       - "Messaging_App.sln"
       - "global.json"
       - ".github/workflows/backend.yml"
@@ -15,7 +14,6 @@ on:
     paths:
       - "Backend/**"
       - "Backend.Tests/**"
-      - "Database/**"
       - "Messaging_App.sln"
       - "global.json"
       - ".github/workflows/backend.yml"
