@@ -1,0 +1,2 @@
+# Prevents sensitive database data from being pushed
+/appsettings.Development.json
