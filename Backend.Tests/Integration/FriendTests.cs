@@ -1,59 +1,13 @@
 using System.Net;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Backend.Tests.Helpers;
 
 namespace Backend.Tests.Integration;
 
-public class FriendTests : IClassFixture<TestWebApplicationFactory>
+public class FriendTests : IntegrationTestBase
 {
-    private readonly HttpClient client;
-
-    public FriendTests(TestWebApplicationFactory factory)
+    public FriendTests(TestWebApplicationFactory factory) : base(factory)
     {
-        client = factory.CreateClient();
-    }
-
-    private async Task<string> RegisterAndGetToken(string username, string email)
-    {
-        RegisterRequest request = new RegisterRequest
-        {
-            username = username,
-            email = email,
-            password = "Test123!"
-        };
-        HttpResponseMessage response = await client.PostAsJsonAsync("/auth/register", request, TestContext.Current.CancellationToken);
-        AuthResult? result = await response.Content.ReadFromJsonAsync<AuthResult>(TestContext.Current.CancellationToken);
-        return result!.accessToken;
-    }
-
-    private static HttpRequestMessage CreateRequest(HttpMethod method, string url, string token, object? body = null)
-    {
-        HttpRequestMessage request = new HttpRequestMessage(method, url);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        if (body != null)
-        {
-            request.Content = JsonContent.Create(body);
-        }
-        return request;
-    }
-
-    private async Task<(string tokenA, string tokenB)> RegisterTwoUsers(string usernameA, string usernameB)
-    {
-        string tokenA = await RegisterAndGetToken(usernameA, $"{usernameA}@email.com");
-        string tokenB = await RegisterAndGetToken(usernameB, $"{usernameB}@email.com");
-        return (tokenA, tokenB);
-    }
-
-    private async Task SendFriendRequest(string senderToken, string receiverUsername)
-    {
-        await client.SendAsync(CreateRequest(HttpMethod.Post, "/friends/requests", senderToken, new SendFriendRequestRequest { username = receiverUsername }), TestContext.Current.CancellationToken);
-    }
-
-    private async Task EstablishFriendship(string senderToken, string senderUsername, string receiverToken, string receiverUsername)
-    {
-        await SendFriendRequest(senderToken, receiverUsername);
-        await client.SendAsync(CreateRequest(HttpMethod.Post, $"/friends/requests/{senderUsername}/accept", receiverToken), TestContext.Current.CancellationToken);
     }
 
     //SEND REQUEST
@@ -61,7 +15,7 @@ public class FriendTests : IClassFixture<TestWebApplicationFactory>
     public async Task SendRequest_ToValidUser_ReturnsPendingStatus()
     {
         //arrange
-        (string tokenA, _) = await RegisterTwoUsers("frsendA", "frsendB");
+        (string tokenA, string tokenB) = await RegisterTwoUsers("frsendA", "frsendB");
 
         //act
         HttpResponseMessage response = await client.SendAsync(CreateRequest(HttpMethod.Post, "/friends/requests", tokenA, new SendFriendRequestRequest { username = "frsendB" }), TestContext.Current.CancellationToken);
@@ -71,6 +25,8 @@ public class FriendTests : IClassFixture<TestWebApplicationFactory>
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.NotNull(result);
         Assert.Equal(FriendStatus.pending, result.status);
+        Assert.Contains(await GetJson<List<UserResult>>("/friends/requests", tokenB), user => user.username == "frsendA");
+        Assert.Contains(await GetJson<List<UserResult>>("/friends/requests?direction=outgoing", tokenA), user => user.username == "frsendB");
     }
 
     [Fact]
@@ -88,6 +44,9 @@ public class FriendTests : IClassFixture<TestWebApplicationFactory>
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.NotNull(result);
         Assert.Equal(FriendStatus.friends, result.status);
+        Assert.Contains(await GetJson<List<UserResult>>("/friends", tokenA), user => user.username == "frcrossB");
+        Assert.Contains(await GetJson<List<UserResult>>("/friends", tokenB), user => user.username == "frcrossA");
+        Assert.Empty(await GetJson<List<UserResult>>("/friends/requests", tokenA));
     }
 
     [Fact]
@@ -214,6 +173,9 @@ public class FriendTests : IClassFixture<TestWebApplicationFactory>
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.NotNull(result);
         Assert.Equal("fracceptA", result.username);
+        Assert.Contains(await GetJson<List<UserResult>>("/friends", tokenA), user => user.username == "fracceptB");
+        Assert.Contains(await GetJson<List<UserResult>>("/friends", tokenB), user => user.username == "fracceptA");
+        Assert.Empty(await GetJson<List<UserResult>>("/friends/requests", tokenB));
     }
 
     [Fact]
@@ -265,6 +227,9 @@ public class FriendTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Empty(await GetJson<List<UserResult>>("/friends/requests", tokenB));
+        Assert.Empty(await GetJson<List<UserResult>>("/friends/requests?direction=outgoing", tokenA));
+        Assert.Empty(await GetJson<List<UserResult>>("/friends", tokenB));
     }
 
     [Fact]
@@ -321,6 +286,8 @@ public class FriendTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Empty(await GetJson<List<UserResult>>("/friends", tokenA));
+        Assert.Empty(await GetJson<List<UserResult>>("/friends", tokenB));
     }
 
     [Fact]
@@ -358,6 +325,7 @@ public class FriendTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Contains(await GetJson<List<UserResult>>("/friends/blocked", tokenA), user => user.username == "frblockB");
     }
 
     [Fact]
@@ -399,6 +367,38 @@ public class FriendTests : IClassFixture<TestWebApplicationFactory>
 
     //UNBLOCK USER
     [Fact]
+    public async Task BlockUser_WhenFriends_EndsFriendshipForBoth()
+    {
+        //arrange
+        (string tokenA, string tokenB) = await RegisterTwoUsers("frblockfrA", "frblockfrB");
+        await EstablishFriendship(tokenA, "frblockfrA", tokenB, "frblockfrB");
+
+        //act
+        HttpResponseMessage response = await client.SendAsync(CreateRequest(HttpMethod.Put, "/friends/blocked/frblockfrB", tokenA), TestContext.Current.CancellationToken);
+
+        //assert
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Empty(await GetJson<List<UserResult>>("/friends", tokenA));
+        Assert.Empty(await GetJson<List<UserResult>>("/friends", tokenB));
+    }
+
+    [Fact]
+    public async Task BlockUser_WithPendingRequest_RemovesRequest()
+    {
+        //arrange
+        (string tokenA, string tokenB) = await RegisterTwoUsers("frblockreqA", "frblockreqB");
+        await SendFriendRequest(tokenB, "frblockreqA");
+
+        //act
+        HttpResponseMessage response = await client.SendAsync(CreateRequest(HttpMethod.Put, "/friends/blocked/frblockreqB", tokenA), TestContext.Current.CancellationToken);
+
+        //assert
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Empty(await GetJson<List<UserResult>>("/friends/requests", tokenA));
+        Assert.Empty(await GetJson<List<UserResult>>("/friends/requests?direction=outgoing", tokenB));
+    }
+
+    [Fact]
     public async Task UnblockUser_WhenBlocked_ReturnsNoContent()
     {
         //arrange
@@ -410,6 +410,7 @@ public class FriendTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Empty(await GetJson<List<UserResult>>("/friends/blocked", tokenA));
     }
 
     [Fact]

@@ -1,61 +1,14 @@
 using System.Net;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Backend.Tests.Helpers;
+using Microsoft.EntityFrameworkCore;
 
 namespace Backend.Tests.Integration;
 
-public class ConversationTests : IClassFixture<TestWebApplicationFactory>
+public class ConversationTests : IntegrationTestBase
 {
-    private readonly HttpClient client;
-
-    public ConversationTests(TestWebApplicationFactory factory)
+    public ConversationTests(TestWebApplicationFactory factory) : base(factory)
     {
-        client = factory.CreateClient();
-    }
-
-    private async Task<string> RegisterAndGetToken(string username, string email)
-    {
-        RegisterRequest request = new RegisterRequest
-        {
-            username = username,
-            email = email,
-            password = "Test123!"
-        };
-        HttpResponseMessage response = await client.PostAsJsonAsync("/auth/register", request, TestContext.Current.CancellationToken);
-        AuthResult? result = await response.Content.ReadFromJsonAsync<AuthResult>(TestContext.Current.CancellationToken);
-        return result!.accessToken;
-    }
-
-    private static HttpRequestMessage CreateRequest(HttpMethod method, string url, string token, object? body = null)
-    {
-        HttpRequestMessage request = new HttpRequestMessage(method, url);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        if (body != null)
-        {
-            request.Content = JsonContent.Create(body);
-        }
-        return request;
-    }
-
-    private async Task<(string tokenA, string tokenB, long conversationId)> CreateDmConversation(string usernameA, string usernameB)
-    {
-        string tokenA = await RegisterAndGetToken(usernameA, $"{usernameA}@email.com");
-        string tokenB = await RegisterAndGetToken(usernameB, $"{usernameB}@email.com");
-        HttpResponseMessage response = await client.SendAsync(CreateRequest(HttpMethod.Post, "/conversations", tokenA, new CreateConversationRequest { memberUsernames = new List<string> { usernameB } }),TestContext.Current.CancellationToken);
-        CreateConversationResult? result = await response.Content.ReadFromJsonAsync<CreateConversationResult>(TestContext.Current.CancellationToken);
-        return (tokenA, tokenB, result!.conversationID);
-    }
-
-    // memberUsernames must have 2+ entries to create a group (1 entry creates a DM)
-    private async Task<(string ownerToken, long conversationId)> CreateGroupConversation(string ownerUsername, List<string> memberUsernames)
-    {
-        string ownerToken = await RegisterAndGetToken(ownerUsername, $"{ownerUsername}@email.com");
-        foreach (string member in memberUsernames)
-            await RegisterAndGetToken(member, $"{member}@email.com");
-        HttpResponseMessage response = await client.SendAsync(CreateRequest(HttpMethod.Post, "/conversations", ownerToken, new CreateConversationRequest { memberUsernames = memberUsernames }),TestContext.Current.CancellationToken);
-        CreateConversationResult? result = await response.Content.ReadFromJsonAsync<CreateConversationResult>(TestContext.Current.CancellationToken);
-        return (ownerToken, result!.conversationID);
     }
 
     //CREATE CONVERSATION
@@ -466,7 +419,7 @@ public class ConversationTests : IClassFixture<TestWebApplicationFactory>
     {
         //arrange
         (string ownerToken, long conversationId) = await CreateGroupConversation("cvaddowner", new List<string> { "cvaddmem", "cvaddmem2" });
-        await RegisterAndGetToken("cvaddnewmem", "cvaddnewmem@email.com");
+        string newMemberToken = await RegisterAndGetToken("cvaddnewmem", "cvaddnewmem@email.com");
 
         //act
         HttpResponseMessage response = await client.SendAsync(CreateRequest(HttpMethod.Post, $"/conversations/{conversationId}/members", ownerToken, new AddConversationMemberRequest { username = "cvaddnewmem" }),TestContext.Current.CancellationToken);
@@ -476,6 +429,8 @@ public class ConversationTests : IClassFixture<TestWebApplicationFactory>
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.NotNull(result);
         Assert.Equal("cvaddnewmem", result.username);
+        Assert.Contains(await GetConversationMembers(ownerToken, conversationId), member => member.username == "cvaddnewmem");
+        Assert.Contains(await GetConversations(newMemberToken), conversation => conversation.id == conversationId);
     }
 
     [Fact]
@@ -511,6 +466,7 @@ public class ConversationTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.DoesNotContain(await GetConversationMembers(ownerToken, conv.conversationID), member => member.username == "cvaddnonownradd");
     }
 
     [Fact]
@@ -581,13 +537,15 @@ public class ConversationTests : IClassFixture<TestWebApplicationFactory>
     public async Task LeaveConversation_AsDmMember_ReturnsNoContent()
     {
         //arrange
-        (string tokenA, _, long conversationId) = await CreateDmConversation("cvleavedmA", "cvleavedmB");
+        (string tokenA, string tokenB, long conversationId) = await CreateDmConversation("cvleavedmA", "cvleavedmB");
 
         //act
         HttpResponseMessage response = await client.SendAsync(CreateRequest(HttpMethod.Delete, $"/conversations/{conversationId}/members/me", tokenA), TestContext.Current.CancellationToken);
 
         //assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.DoesNotContain(await GetConversations(tokenA), conversation => conversation.id == conversationId);
+        Assert.Contains(await GetConversations(tokenB), conversation => conversation.id == conversationId);
     }
 
     [Fact]
@@ -605,6 +563,8 @@ public class ConversationTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.DoesNotContain(await GetConversationMembers(ownerToken, conv.conversationID), member => member.username == "cvleavegrpmem");
+        Assert.Equal(HttpStatusCode.Forbidden, await GetStatus($"/conversations/{conv.conversationID}", memberToken));
     }
 
     [Fact]
@@ -619,6 +579,8 @@ public class ConversationTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        bool conversationExists = await WithDatabase(async db => await db.Conversations.AnyAsync(conversation => conversation.id == conversationId, TestContext.Current.CancellationToken));
+        Assert.False(conversationExists);
     }
 
     [Fact]
@@ -660,6 +622,26 @@ public class ConversationTests : IClassFixture<TestWebApplicationFactory>
 
     //UPDATE CONVERSATION
     [Fact]
+    public async Task LeaveConversation_AsGroupOwner_TransfersOwnership()
+    {
+        //arrange
+        (string ownerToken, long conversationId) = await CreateGroupConversation("cvleaveownr", new List<string> { "cvleaveownrm1", "cvleaveownrm2" });
+        string memberToken = await Login("cvleaveownrm1");
+        await RegisterAndGetToken("cvleaveownradd");
+
+        //act
+        HttpResponseMessage response = await client.SendAsync(CreateRequest(HttpMethod.Delete, $"/conversations/{conversationId}/members/me", ownerToken), TestContext.Current.CancellationToken);
+
+        //assert
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        ConversationResult conversation = await GetJson<ConversationResult>($"/conversations/{conversationId}", memberToken);
+        Assert.Contains(conversation.ownerUsername, new List<string> { "cvleaveownrm1", "cvleaveownrm2" });
+        string newOwnerToken = await Login(conversation.ownerUsername!);
+        HttpResponseMessage addResponse = await Send(HttpMethod.Post, $"/conversations/{conversationId}/members", newOwnerToken, new AddConversationMemberRequest { username = "cvleaveownradd" });
+        Assert.Equal(HttpStatusCode.OK, addResponse.StatusCode);
+    }
+
+    [Fact]
     public async Task UpdateConversation_AsMemberWithValidData_ReturnsNoContent()
     {
         //arrange
@@ -674,6 +656,8 @@ public class ConversationTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        ConversationResult updated = await GetJson<ConversationResult>($"/conversations/{conv.conversationID}", ownerToken);
+        Assert.Equal("Updated Name", updated.conversationName);
     }
 
     [Fact]
@@ -701,6 +685,8 @@ public class ConversationTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        ConversationResult unchanged = await GetJson<ConversationResult>($"/conversations/{conversationId}", ownerToken);
+        Assert.NotEqual("Hacked Name", unchanged.conversationName);
     }
 
     [Fact]
