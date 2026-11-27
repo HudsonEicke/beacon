@@ -121,4 +121,6 @@ shred -u ~/github-deploy ~/github-deploy.pub
 
 ### Container images
 
-The first publish creates the `beacon-api` and `beacon-web` packages, and they start out **private**. The server pulls without logging in, so that first deploy fails at "Pulling images". For each package, go to **Package settings → Change visibility → Public**, then re-run the deploy job.
+The first publish creates the `beacon-api` and `beacon-web` packages. They take the repo's visibility, so in this public repo they're public, and the server pulls them without logging in. Nothing needs setting up.
+
+If the packages are private (for example, published from a private fork), the deploy fails at "Pulling images". For each package, go to **Package settings → Change visibility → Public**, then re-run the deploy job.
