@@ -1,65 +1,13 @@
 using System.Net;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Backend.Tests.Helpers;
 
 namespace Backend.Tests.Integration;
 
-public class ServerTests : IClassFixture<TestWebApplicationFactory>
+public class ServerTests : IntegrationTestBase
 {
-    private readonly HttpClient client;
-
-    public ServerTests(TestWebApplicationFactory factory)
+    public ServerTests(TestWebApplicationFactory factory) : base(factory)
     {
-        client = factory.CreateClient();
-    }
-
-    private async Task<string> RegisterAndGetToken(string username, string email)
-    {
-        RegisterRequest request = new RegisterRequest
-        {
-            username = username,
-            email = email,
-            password = "Test123!"
-        };
-        HttpResponseMessage response = await client.PostAsJsonAsync("/auth/register", request, TestContext.Current.CancellationToken);
-        AuthResult? result = await response.Content.ReadFromJsonAsync<AuthResult>(TestContext.Current.CancellationToken);
-        return result!.accessToken;
-    }
-
-    private static HttpRequestMessage CreateRequest(HttpMethod method, string url, string token, object? body = null)
-    {
-        HttpRequestMessage request = new HttpRequestMessage(method, url);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        if (body != null)
-        {
-            request.Content = JsonContent.Create(body);
-        }
-        return request;
-    }
-
-    private async Task<(string token, long serverId)> CreateServerAndGetId(string username)
-    {
-        string token = await RegisterAndGetToken(username, $"{username}@email.com");
-        HttpResponseMessage response = await client.SendAsync(CreateRequest(HttpMethod.Post, "/servers", token, new CreateServerRequest { serverName = $"{username}server" }), TestContext.Current.CancellationToken);
-        CreateServerResult? result = await response.Content.ReadFromJsonAsync<CreateServerResult>(TestContext.Current.CancellationToken);
-        return (token, result!.serverID);
-    }
-
-    private async Task<Guid> CreateInviteCode(string ownerToken, long serverId, CreateInviteRequest? inviteRequest = null)
-    {
-        HttpResponseMessage response = await client.SendAsync(CreateRequest(HttpMethod.Post, $"/servers/{serverId}/invites", ownerToken, inviteRequest ?? new CreateInviteRequest()), TestContext.Current.CancellationToken);
-        CreateInviteResult? result = await response.Content.ReadFromJsonAsync<CreateInviteResult>(TestContext.Current.CancellationToken);
-        return result!.inviteCode;
-    }
-
-    private async Task<(string ownerToken, string memberToken, long serverId)> CreateServerWithMember(string ownerUsername, string memberUsername)
-    {
-        (string ownerToken, long serverId) = await CreateServerAndGetId(ownerUsername);
-        string memberToken = await RegisterAndGetToken(memberUsername, $"{memberUsername}@email.com");
-        Guid inviteCode = await CreateInviteCode(ownerToken, serverId);
-        await client.SendAsync(CreateRequest(HttpMethod.Post, $"/invites/{inviteCode}/join", memberToken), TestContext.Current.CancellationToken);
-        return (ownerToken, memberToken, serverId);
     }
 
     //CREATE SERVER
@@ -259,6 +207,8 @@ public class ServerTests : IClassFixture<TestWebApplicationFactory>
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.NotNull(result);
         Assert.Equal("Updated Name", result.serverName);
+        ServerResult saved = await GetJson<ServerResult>($"/servers/{serverId}", token);
+        Assert.Equal("Updated Name", saved.serverName);
     }
 
     [Fact]
@@ -272,6 +222,8 @@ public class ServerTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        ServerResult unchanged = await GetJson<ServerResult>($"/servers/{serverId}", memberToken);
+        Assert.Equal("svupdatenonownrserver", unchanged.serverName);
     }
 
     [Fact]
@@ -309,6 +261,9 @@ public class ServerTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, await GetStatus($"/servers/{serverId}", token));
+        List<ServerResult> servers = await GetJson<List<ServerResult>>("/servers", token);
+        Assert.DoesNotContain(servers, server => server.serverID == serverId);
     }
 
     [Fact]
@@ -322,6 +277,7 @@ public class ServerTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, await GetStatus($"/servers/{serverId}", memberToken));
     }
 
     [Fact]
@@ -352,13 +308,16 @@ public class ServerTests : IClassFixture<TestWebApplicationFactory>
     public async Task LeaveServer_AsMember_ReturnsNoContent()
     {
         //arrange
-        (_, string memberToken, long serverId) = await CreateServerWithMember("svleaveowner", "svleavemember");
+        (string ownerToken, string memberToken, long serverId) = await CreateServerWithMember("svleaveowner", "svleavemember");
 
         //act
         HttpResponseMessage response = await client.SendAsync(CreateRequest(HttpMethod.Delete, $"/servers/{serverId}/members/me", memberToken), TestContext.Current.CancellationToken);
 
         //assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        List<UserResult> members = await GetServerMembers(ownerToken, serverId);
+        Assert.DoesNotContain(members, member => member.username == "svleavemember");
+        Assert.Equal(HttpStatusCode.Forbidden, await GetStatus($"/servers/{serverId}", memberToken));
     }
 
     [Fact]
@@ -386,6 +345,7 @@ public class ServerTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, await GetStatus($"/servers/{serverId}", token));
     }
 
     [Fact]
@@ -398,18 +358,38 @@ public class ServerTests : IClassFixture<TestWebApplicationFactory>
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
+    [Fact]
+    public async Task LeaveServer_AsOwnerWithMembers_TransfersOwnership()
+    {
+        //arrange
+        (string ownerToken, string memberToken, long serverId) = await CreateServerWithMember("svleaveownr", "svleaveownrmem");
+
+        //act
+        HttpResponseMessage response = await client.SendAsync(CreateRequest(HttpMethod.Delete, $"/servers/{serverId}/members/me", ownerToken), TestContext.Current.CancellationToken);
+
+        //assert
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        ServerResult server = await GetJson<ServerResult>($"/servers/{serverId}", memberToken);
+        Assert.Equal("svleaveownrmem", server.ownerUsername);
+        HttpResponseMessage renameResponse = await Send(HttpMethod.Patch, $"/servers/{serverId}", memberToken, new UpdateServerRequest { serverName = "New Owner's Server" });
+        Assert.Equal(HttpStatusCode.OK, renameResponse.StatusCode);
+    }
+
     //KICK USER
     [Fact]
     public async Task KickUser_AsOwner_ReturnsNoContent()
     {
         //arrange
-        (string ownerToken, _, long serverId) = await CreateServerWithMember("svkickowner", "svkickmember");
+        (string ownerToken, string memberToken, long serverId) = await CreateServerWithMember("svkickowner", "svkickmember");
 
         //act
         HttpResponseMessage response = await client.SendAsync(CreateRequest(HttpMethod.Delete, $"/servers/{serverId}/members/svkickmember", ownerToken), TestContext.Current.CancellationToken);
 
         //assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        List<UserResult> members = await GetServerMembers(ownerToken, serverId);
+        Assert.DoesNotContain(members, member => member.username == "svkickmember");
+        Assert.Equal(HttpStatusCode.Forbidden, await GetStatus($"/servers/{serverId}/channels", memberToken));
     }
 
     [Fact]
@@ -423,6 +403,8 @@ public class ServerTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        List<UserResult> members = await GetServerMembers(ownerToken, serverId);
+        Assert.Contains(members, member => member.username == "svkicknonownr");
     }
 
     [Fact]
@@ -584,6 +566,8 @@ public class ServerTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        List<InviteResult> invites = await GetJson<List<InviteResult>>($"/servers/{serverId}/invites", token);
+        Assert.DoesNotContain(invites, invite => invite.inviteCode == inviteCode);
     }
 
     [Fact]
@@ -598,6 +582,8 @@ public class ServerTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        List<InviteResult> invites = await GetJson<List<InviteResult>>($"/servers/{serverId}/invites", ownerToken);
+        Assert.Contains(invites, invite => invite.inviteCode == inviteCode);
     }
 
     [Fact]
@@ -729,6 +715,10 @@ public class ServerTests : IClassFixture<TestWebApplicationFactory>
         Assert.NotNull(result);
         Assert.Equal(serverId, result.serverID);
         Assert.Equal("svjoinowner", result.ownerUsername);
+        List<ServerResult> joinedServers = await GetJson<List<ServerResult>>("/servers", joinerToken);
+        Assert.Contains(joinedServers, server => server.serverID == serverId);
+        List<InviteResult> invites = await GetJson<List<InviteResult>>($"/servers/{serverId}/invites", ownerToken);
+        Assert.Equal(1, invites.Single(invite => invite.inviteCode == inviteCode).uses);
     }
 
     [Fact]
@@ -771,6 +761,7 @@ public class ServerTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, await GetStatus($"/servers/{serverId}", joinerToken));
     }
 
     [Fact]
@@ -788,6 +779,7 @@ public class ServerTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, await GetStatus($"/servers/{serverId}", secondJoinerToken));
     }
 
     [Fact]

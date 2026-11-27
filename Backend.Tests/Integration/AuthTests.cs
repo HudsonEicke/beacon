@@ -1,16 +1,16 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
 using Backend.Tests.Helpers;
+using Microsoft.EntityFrameworkCore;
 
 namespace Backend.Tests.Integration;
 
-public class AuthTests : IClassFixture<TestWebApplicationFactory>
+public class AuthTests : IntegrationTestBase
 {
-    private readonly HttpClient client;
-
-    public AuthTests(TestWebApplicationFactory factory)
+    public AuthTests(TestWebApplicationFactory factory) : base(factory)
     {
-        client = factory.CreateClient();
     }
 
     //REGISTER
@@ -262,6 +262,58 @@ public class AuthTests : IClassFixture<TestWebApplicationFactory>
     }
 
     //LOGOUT
+    [Fact]
+    public async Task Refresh_WithReusedToken_RevokesEverySession()
+    {
+        //arrange: two sessions, and the first one's refresh token is used once
+        AuthResult firstSession = await Register("reusetoken");
+        string secondSessionRefreshToken = (await LoginAndGetResult("reusetoken")).refreshToken;
+        AuthResult rotated = await RefreshAndGetResult(firstSession);
+
+        //act: the replaced token is used again, as a thief holding a copy would
+        HttpResponseMessage response = await client.PostAsJsonAsync("/auth/refresh", new RefreshRequest { accessToken = firstSession.accessToken, refreshToken = firstSession.refreshToken }, TestContext.Current.CancellationToken);
+
+        //assert
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        HttpResponseMessage rotatedResponse = await client.PostAsJsonAsync("/auth/refresh", new RefreshRequest { accessToken = rotated.accessToken, refreshToken = rotated.refreshToken }, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, rotatedResponse.StatusCode);
+        HttpResponseMessage secondSessionResponse = await client.PostAsJsonAsync("/auth/refresh", new RefreshRequest { refreshToken = secondSessionRefreshToken }, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, secondSessionResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task Refresh_WithExpiredToken_ReturnsUnauthorized()
+    {
+        //arrange
+        AuthResult session = await Register("expiredtoken");
+        string hashedToken = Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(session.refreshToken)));
+        await WithDatabase(async db => await db.RefreshTokens.Where(token => token.token == hashedToken).ExecuteUpdateAsync(setters => setters.SetProperty(token => token.expiresDate, DateTimeOffset.UtcNow.AddMinutes(-1)), TestContext.Current.CancellationToken));
+
+        //act
+        HttpResponseMessage response = await client.PostAsJsonAsync("/auth/refresh", new RefreshRequest { accessToken = session.accessToken, refreshToken = session.refreshToken }, TestContext.Current.CancellationToken);
+        AuthResult? result = await response.Content.ReadFromJsonAsync<AuthResult>(TestContext.Current.CancellationToken);
+
+        //assert
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal("Token has expired", result?.message);
+    }
+
+    private async Task<AuthResult> LoginAndGetResult(string username)
+    {
+        HttpResponseMessage response = await client.PostAsJsonAsync("/auth/login", new LoginRequest { username = username, password = TestPassword }, TestContext.Current.CancellationToken);
+        await AssertSuccess(response);
+
+        return (await response.Content.ReadFromJsonAsync<AuthResult>(TestContext.Current.CancellationToken))!;
+    }
+
+    private async Task<AuthResult> RefreshAndGetResult(AuthResult session)
+    {
+        HttpResponseMessage response = await client.PostAsJsonAsync("/auth/refresh", new RefreshRequest { accessToken = session.accessToken, refreshToken = session.refreshToken }, TestContext.Current.CancellationToken);
+        await AssertSuccess(response);
+
+        return (await response.Content.ReadFromJsonAsync<AuthResult>(TestContext.Current.CancellationToken))!;
+    }
+
     [Fact]
     public async Task Logout_WithValidToken_ReturnsOk()
     {

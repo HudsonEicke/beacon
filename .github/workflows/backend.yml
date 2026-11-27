@@ -1,0 +1,53 @@
+name: Backend
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "Backend/**"
+      - "Backend.Tests/**"
+      - "Database/**"
+      - "Messaging_App.sln"
+      - "global.json"
+      - ".github/workflows/backend.yml"
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - "Backend/**"
+      - "Backend.Tests/**"
+      - "Database/**"
+      - "Messaging_App.sln"
+      - "global.json"
+      - ".github/workflows/backend.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    # actions are pinned to commit SHAs so a moved tag can't change what runs
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+      with:
+        global-json-file: global.json
+        cache: true
+        cache-dependency-path: "**/packages.lock.json"
+
+    # fails if a package resolves to anything other than what the lock files say
+    - name: Restore dependencies
+      run: dotnet restore --locked-mode
+
+    - name: Build
+      run: dotnet build --no-restore
+
+    # the integration tests start their own Postgres container with Testcontainers, using the runner's Docker
+    - name: Test
+      run: dotnet test --no-build

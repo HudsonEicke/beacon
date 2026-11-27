@@ -1,69 +1,16 @@
 using System.Net;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Backend.Tests.Helpers;
+using Messaging_App.Services;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Backend.Tests.Integration;
 
-public class ConversationMessageTests : IClassFixture<TestWebApplicationFactory>
+public class ConversationMessageTests : IntegrationTestBase
 {
-    private readonly HttpClient client;
-
-    public ConversationMessageTests(TestWebApplicationFactory factory)
+    public ConversationMessageTests(TestWebApplicationFactory factory) : base(factory)
     {
-        client = factory.CreateClient();
-    }
-
-    private async Task<string> RegisterAndGetToken(string username, string email)
-    {
-        RegisterRequest request = new RegisterRequest
-        {
-            username = username,
-            email = email,
-            password = "Test123!"
-        };
-        HttpResponseMessage response = await client.PostAsJsonAsync("/auth/register", request, TestContext.Current.CancellationToken);
-        AuthResult? result = await response.Content.ReadFromJsonAsync<AuthResult>(TestContext.Current.CancellationToken);
-        return result!.accessToken;
-    }
-
-    private static HttpRequestMessage CreateRequest(HttpMethod method, string url, string token, object? body = null)
-    {
-        HttpRequestMessage request = new HttpRequestMessage(method, url);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        if (body != null)
-        {
-            request.Content = JsonContent.Create(body);
-        }
-        return request;
-    }
-
-    private async Task<(string tokenA, string tokenB, long conversationId)> CreateDmConversation(string usernameA, string usernameB)
-    {
-        string tokenA = await RegisterAndGetToken(usernameA, $"{usernameA}@email.com");
-        string tokenB = await RegisterAndGetToken(usernameB, $"{usernameB}@email.com");
-        HttpResponseMessage response = await client.SendAsync(CreateRequest(HttpMethod.Post, "/conversations", tokenA, new CreateConversationRequest { memberUsernames = [usernameB] }),TestContext.Current.CancellationToken);
-        CreateConversationResult? result = await response.Content.ReadFromJsonAsync<CreateConversationResult>(TestContext.Current.CancellationToken);
-        return (tokenA, tokenB, result!.conversationID);
-    }
-
-    private async Task<long> SendConversationMessage(string token, long conversationId, string messageText)
-    {
-        HttpResponseMessage response = await client.SendAsync(CreateRequest(HttpMethod.Post, $"/conversations/{conversationId}/messages", token, new SendMessageRequest { messageText = messageText }),TestContext.Current.CancellationToken);
-        SendMessageResult? result = await response.Content.ReadFromJsonAsync<SendMessageResult>(TestContext.Current.CancellationToken);
-        return result!.id;
-    }
-
-    private async Task<HttpResponseMessage> MarkConversationRead(string token, long conversationId, long messageId)
-    {
-        return await client.SendAsync(CreateRequest(HttpMethod.Put, $"/conversations/{conversationId}/read-state", token, new UpdateReadStateRequest { lastReadMessageID = messageId }), TestContext.Current.CancellationToken);
-    }
-
-    private async Task<List<ConversationResult>> GetConversations(string token)
-    {
-        HttpResponseMessage response = await client.SendAsync(CreateRequest(HttpMethod.Get, "/conversations", token), TestContext.Current.CancellationToken);
-        List<ConversationResult>? result = await response.Content.ReadFromJsonAsync<List<ConversationResult>>(TestContext.Current.CancellationToken);
-        return result!;
     }
 
     //GET MESSAGES
@@ -240,10 +187,47 @@ public class ConversationMessageTests : IClassFixture<TestWebApplicationFactory>
 
     //SEND MESSAGE
     [Fact]
+    public async Task GetConversationMessages_WithMoreThanOnePage_ReturnsNewestFiftyThenOlderPage()
+    {
+        //arrange
+        (string tokenA, _, long conversationId) = await CreateDmConversation("cmpaging", "cmpagingb");
+        List<long> sentIds = new List<long>();
+
+        for (int messageNumber = 1; messageNumber <= 55; messageNumber++)
+        {
+            sentIds.Add(await SendConversationMessage(tokenA, conversationId, $"Message {messageNumber}"));
+        }
+
+        //act
+        List<MessageResult> firstPage = await GetConversationMessages(tokenA, conversationId);
+        List<MessageResult> secondPage = await GetJson<List<MessageResult>>($"/conversations/{conversationId}/messages?before={firstPage.Last().id}", tokenA);
+
+        //assert
+        Assert.Equal(sentIds.AsEnumerable().Reverse().Take(50).ToList(), firstPage.Select(message => message.id).ToList());
+        Assert.Equal(sentIds.AsEnumerable().Reverse().Skip(50).ToList(), secondPage.Select(message => message.id).ToList());
+    }
+
+    [Fact]
+    public async Task SendConversationMessage_StoresTextEncrypted()
+    {
+        //arrange
+        (string tokenA, _, long conversationId) = await CreateDmConversation("cmencrypted", "cmencryptedb");
+
+        //act
+        long messageId = await SendConversationMessage(tokenA, conversationId, "Secret plans");
+
+        //assert
+        string storedText = await WithDatabase(async db => (await db.ConversationMessages.SingleAsync(message => message.id == messageId, TestContext.Current.CancellationToken)).messageText);
+        Assert.DoesNotContain("Secret", storedText);
+        EncryptionService encryptionService = factory.Services.GetRequiredService<EncryptionService>();
+        Assert.Equal("Secret plans", encryptionService.Decrypt(storedText));
+    }
+
+    [Fact]
     public async Task SendConversationMessage_AsMember_ReturnsOkWithMessage()
     {
         //arrange
-        (string tokenA, _, long conversationId) = await CreateDmConversation("cmsendmsg", "cmsendmsgb");
+        (string tokenA, string tokenB, long conversationId) = await CreateDmConversation("cmsendmsg", "cmsendmsgb");
 
         //act
         HttpResponseMessage response = await client.SendAsync(CreateRequest(HttpMethod.Post, $"/conversations/{conversationId}/messages", tokenA, new SendMessageRequest { messageText = "Hello world" }),TestContext.Current.CancellationToken);
@@ -255,6 +239,8 @@ public class ConversationMessageTests : IClassFixture<TestWebApplicationFactory>
         Assert.Equal("Hello world", result.messageText);
         Assert.Equal("cmsendmsg", result.senderUsername);
         Assert.True(result.id > 0);
+        MessageResult received = Assert.Single(await GetConversationMessages(tokenB, conversationId));
+        Assert.Equal("Hello world", received.messageText);
     }
 
     [Fact]
@@ -278,7 +264,7 @@ public class ConversationMessageTests : IClassFixture<TestWebApplicationFactory>
     public async Task SendConversationMessage_AsNonMember_ReturnsForbidden()
     {
         //arrange
-        (_, _, long conversationId) = await CreateDmConversation("cmsendmsgownr", "cmsendmsgownrb");
+        (string tokenA, _, long conversationId) = await CreateDmConversation("cmsendmsgownr", "cmsendmsgownrb");
         string nonMemberToken = await RegisterAndGetToken("cmsendmsgnonem", "cmsendmsgnonem@email.com");
 
         //act
@@ -286,6 +272,7 @@ public class ConversationMessageTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Empty(await GetConversationMessages(tokenA, conversationId));
     }
 
     [Fact]
@@ -337,6 +324,9 @@ public class ConversationMessageTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        MessageResult edited = Assert.Single(await GetConversationMessages(tokenA, conversationId));
+        Assert.Equal("Edited text", edited.messageText);
+        Assert.True(edited.edited);
     }
 
     [Fact]
@@ -351,6 +341,9 @@ public class ConversationMessageTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        MessageResult unchanged = Assert.Single(await GetConversationMessages(tokenA, conversationId));
+        Assert.Equal("A's message", unchanged.messageText);
+        Assert.False(unchanged.edited);
     }
 
     [Fact]
@@ -417,6 +410,7 @@ public class ConversationMessageTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Empty(await GetConversationMessages(tokenA, conversationId));
     }
 
     [Fact]
@@ -436,6 +430,7 @@ public class ConversationMessageTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Empty(await GetConversationMessages(memberToken, conversationId));
     }
 
     [Fact]
@@ -450,6 +445,7 @@ public class ConversationMessageTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Single(await GetConversationMessages(tokenA, conversationId));
     }
 
     [Fact]

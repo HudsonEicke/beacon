@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Backend.Tests.Helpers;
 using Messaging_App.Data;
@@ -7,39 +6,10 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Backend.Tests.Integration;
 
-public class UserTests : IClassFixture<TestWebApplicationFactory>
+public class UserTests : IntegrationTestBase
 {
-    private readonly HttpClient client;
-    private readonly TestWebApplicationFactory factory;
-
-    public UserTests(TestWebApplicationFactory factory)
+    public UserTests(TestWebApplicationFactory factory) : base(factory)
     {
-        this.factory = factory;
-        client = factory.CreateClient();
-    }
-
-    private async Task<string> RegisterAndGetToken(string username, string email)
-    {
-        RegisterRequest request = new RegisterRequest
-        {
-            username = username,
-            email = email,
-            password = "Test123!"
-        };
-        HttpResponseMessage response = await client.PostAsJsonAsync("/auth/register", request, TestContext.Current.CancellationToken);
-        AuthResult? result = await response.Content.ReadFromJsonAsync<AuthResult>(TestContext.Current.CancellationToken);
-        return result!.accessToken;
-    }
-
-    private static HttpRequestMessage CreateRequest(HttpMethod method, string url, string token, object? body = null)
-    {
-        HttpRequestMessage request = new HttpRequestMessage(method, url);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        if (body != null)
-        {
-            request.Content = JsonContent.Create(body);
-        }
-        return request;
     }
 
     //GET ME
@@ -170,6 +140,8 @@ public class UserTests : IClassFixture<TestWebApplicationFactory>
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.NotNull(result);
         Assert.Equal("New Display Name", result.displayName);
+        UserDetailedResult saved = await GetJson<UserDetailedResult>("/users/me", token);
+        Assert.Equal("New Display Name", saved.displayName);
     }
 
     [Fact]
@@ -258,6 +230,8 @@ public class UserTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        HttpResponseMessage oldPasswordResponse = await client.PostAsJsonAsync("/auth/login", new LoginRequest { username = "updatepassnewlogin", password = "Test123!" }, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, oldPasswordResponse.StatusCode);
     }
 
     [Fact]
@@ -302,6 +276,8 @@ public class UserTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        HttpResponseMessage loginResponse = await client.PostAsJsonAsync("/auth/login", new LoginRequest { username = "updatepasswrong", password = "Test123!" }, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, loginResponse.StatusCode);
     }
 
     [Fact]
@@ -357,6 +333,23 @@ public class UserTests : IClassFixture<TestWebApplicationFactory>
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
+    [Fact]
+    public async Task UpdatePassword_RevokesOtherSessions()
+    {
+        //arrange
+        AuthResult firstSession = await Register("updatepassrevoke");
+        HttpResponseMessage loginResponse = await client.PostAsJsonAsync("/auth/login", new LoginRequest { username = "updatepassrevoke", password = TestPassword }, TestContext.Current.CancellationToken);
+        AuthResult? otherSession = await loginResponse.Content.ReadFromJsonAsync<AuthResult>(TestContext.Current.CancellationToken);
+
+        //act
+        HttpResponseMessage response = await client.SendAsync(CreateRequest(HttpMethod.Put, "/users/me/password", firstSession.accessToken, new UpdatePasswordRequest { currentPassword = TestPassword, newPassword = "NewTest456!" }), TestContext.Current.CancellationToken);
+
+        //assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        HttpResponseMessage refreshResponse = await client.PostAsJsonAsync("/auth/refresh", new RefreshRequest { refreshToken = otherSession!.refreshToken }, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, refreshResponse.StatusCode);
+    }
+
     //UPDATE STATUS
     [Fact]
     public async Task UpdateStatus_WithValidStatus_ReturnsOk()
@@ -370,6 +363,8 @@ public class UserTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        UserDetailedResult saved = await GetJson<UserDetailedResult>("/users/me", token);
+        Assert.Equal(ActivityStatus.away, saved.activityStatus);
     }
 
     [Fact]

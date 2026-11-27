@@ -1,85 +1,16 @@
 using System.Net;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Backend.Tests.Helpers;
+using Messaging_App.Services;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Backend.Tests.Integration;
 
-public class MessageTests : IClassFixture<TestWebApplicationFactory>
+public class MessageTests : IntegrationTestBase
 {
-    private readonly HttpClient client;
-
-    public MessageTests(TestWebApplicationFactory factory)
+    public MessageTests(TestWebApplicationFactory factory) : base(factory)
     {
-        client = factory.CreateClient();
-    }
-
-    private async Task<string> RegisterAndGetToken(string username, string email)
-    {
-        RegisterRequest request = new RegisterRequest
-        {
-            username = username,
-            email = email,
-            password = "Test123!"
-        };
-        HttpResponseMessage response = await client.PostAsJsonAsync("/auth/register", request, TestContext.Current.CancellationToken);
-        AuthResult? result = await response.Content.ReadFromJsonAsync<AuthResult>(TestContext.Current.CancellationToken);
-        return result!.accessToken;
-    }
-
-    private static HttpRequestMessage CreateRequest(HttpMethod method, string url, string token, object? body = null)
-    {
-        HttpRequestMessage request = new HttpRequestMessage(method, url);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        if (body != null)
-        {
-            request.Content = JsonContent.Create(body);
-        }
-        return request;
-    }
-
-    private async Task<(string token, long serverId)> CreateServerAndGetId(string username)
-    {
-        string token = await RegisterAndGetToken(username, $"{username}@email.com");
-        HttpResponseMessage response = await client.SendAsync(CreateRequest(HttpMethod.Post, "/servers", token, new CreateServerRequest { serverName = $"{username}server" }),TestContext.Current.CancellationToken);
-        CreateServerResult? result = await response.Content.ReadFromJsonAsync<CreateServerResult>(TestContext.Current.CancellationToken);
-        return (token, result!.serverID);
-    }
-
-    private async Task<(string ownerToken, string memberToken, long serverId)> CreateServerWithMember(string ownerUsername, string memberUsername)
-    {
-        (string ownerToken, long serverId) = await CreateServerAndGetId(ownerUsername);
-        string memberToken = await RegisterAndGetToken(memberUsername, $"{memberUsername}@email.com");
-        HttpResponseMessage inviteResponse = await client.SendAsync(CreateRequest(HttpMethod.Post, $"/servers/{serverId}/invites", ownerToken, new CreateInviteRequest()),TestContext.Current.CancellationToken);
-        CreateInviteResult? inviteResult = await inviteResponse.Content.ReadFromJsonAsync<CreateInviteResult>(TestContext.Current.CancellationToken);
-        await client.SendAsync(CreateRequest(HttpMethod.Post, $"/invites/{inviteResult!.inviteCode}/join", memberToken),TestContext.Current.CancellationToken);
-        return (ownerToken, memberToken, serverId);
-    }
-
-    private async Task<long> CreateChannel(string ownerToken, long serverId, string channelName)
-    {
-        HttpResponseMessage response = await client.SendAsync(CreateRequest(HttpMethod.Post, $"/servers/{serverId}/channels", ownerToken, new CreateChannelRequest { channelName = channelName }),TestContext.Current.CancellationToken);
-        CreateChannelResult? result = await response.Content.ReadFromJsonAsync<CreateChannelResult>(TestContext.Current.CancellationToken);
-        return result!.channelID;
-    }
-
-    private async Task<long> SendMessage(string token, long channelId, string messageText)
-    {
-        HttpResponseMessage response = await client.SendAsync(CreateRequest(HttpMethod.Post, $"/channels/{channelId}/messages", token, new SendMessageRequest { messageText = messageText }),TestContext.Current.CancellationToken);
-        SendMessageResult? result = await response.Content.ReadFromJsonAsync<SendMessageResult>(TestContext.Current.CancellationToken);
-        return result!.id;
-    }
-
-    private async Task<HttpResponseMessage> MarkChannelRead(string token, long channelId, long messageId)
-    {
-        return await client.SendAsync(CreateRequest(HttpMethod.Put, $"/channels/{channelId}/read-state", token, new UpdateReadStateRequest { lastReadMessageID = messageId }), TestContext.Current.CancellationToken);
-    }
-
-    private async Task<bool> ChannelHasUnread(string token, long serverId, long channelId)
-    {
-        HttpResponseMessage response = await client.SendAsync(CreateRequest(HttpMethod.Get, $"/servers/{serverId}/channels", token), TestContext.Current.CancellationToken);
-        List<ChannelResult>? result = await response.Content.ReadFromJsonAsync<List<ChannelResult>>(TestContext.Current.CancellationToken);
-        return result!.Single(channel => channel.channelID == channelId).hasUnread;
     }
 
     //GET MESSAGES
@@ -287,6 +218,28 @@ public class MessageTests : IClassFixture<TestWebApplicationFactory>
 
     //SEND MESSAGE
     [Fact]
+    public async Task GetMessages_WithMoreThanOnePage_ReturnsNewestFiftyThenOlderPage()
+    {
+        //arrange
+        (string token, long serverId) = await CreateServerAndGetId("mgpaging");
+        long channelId = await CreateChannel(token, serverId, "general");
+        List<long> sentIds = new List<long>();
+
+        for (int messageNumber = 1; messageNumber <= 55; messageNumber++)
+        {
+            sentIds.Add(await SendMessage(token, channelId, $"Message {messageNumber}"));
+        }
+
+        //act
+        List<MessageResult> firstPage = await GetMessages(token, channelId);
+        List<MessageResult> secondPage = await GetJson<List<MessageResult>>($"/channels/{channelId}/messages?before={firstPage.Last().id}", token);
+
+        //assert
+        Assert.Equal(sentIds.AsEnumerable().Reverse().Take(50).ToList(), firstPage.Select(message => message.id).ToList());
+        Assert.Equal(sentIds.AsEnumerable().Reverse().Skip(50).ToList(), secondPage.Select(message => message.id).ToList());
+    }
+
+    [Fact]
     public async Task SendMessage_AsMember_ReturnsOkWithMessage()
     {
         //arrange
@@ -303,6 +256,8 @@ public class MessageTests : IClassFixture<TestWebApplicationFactory>
         Assert.Equal("Hello world", result.messageText);
         Assert.Equal("mgsendmsg", result.senderUsername);
         Assert.True(result.id > 0);
+        List<MessageResult> messages = await GetMessages(token, channelId);
+        Assert.Equal(result.id, Assert.Single(messages).id);
     }
 
     [Fact]
@@ -336,6 +291,7 @@ public class MessageTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Empty(await GetMessages(ownerToken, channelId));
     }
 
     [Fact]
@@ -377,6 +333,24 @@ public class MessageTests : IClassFixture<TestWebApplicationFactory>
 
     //EDIT MESSAGE
     [Fact]
+    public async Task SendMessage_StoresTextEncrypted()
+    {
+        //arrange
+        (string token, long serverId) = await CreateServerAndGetId("mgencrypted");
+        long channelId = await CreateChannel(token, serverId, "general");
+
+        //act
+        long messageId = await SendMessage(token, channelId, "Secret plans");
+
+        //assert
+        string storedText = await WithDatabase(async db => (await db.Messages.SingleAsync(message => message.id == messageId, TestContext.Current.CancellationToken)).messageText);
+        Assert.NotEqual("Secret plans", storedText);
+        Assert.DoesNotContain("Secret", storedText);
+        EncryptionService encryptionService = factory.Services.GetRequiredService<EncryptionService>();
+        Assert.Equal("Secret plans", encryptionService.Decrypt(storedText));
+    }
+
+    [Fact]
     public async Task EditMessage_AsSender_ReturnsNoContent()
     {
         //arrange
@@ -389,6 +363,9 @@ public class MessageTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        MessageResult edited = Assert.Single(await GetMessages(token, channelId));
+        Assert.Equal("Edited text", edited.messageText);
+        Assert.True(edited.edited);
     }
 
     [Fact]
@@ -404,6 +381,9 @@ public class MessageTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        MessageResult unchanged = Assert.Single(await GetMessages(ownerToken, channelId));
+        Assert.Equal("Owner's message", unchanged.messageText);
+        Assert.False(unchanged.edited);
     }
 
     [Fact]
@@ -473,6 +453,7 @@ public class MessageTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Empty(await GetMessages(token, channelId));
     }
 
     [Fact]
@@ -488,6 +469,7 @@ public class MessageTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Empty(await GetMessages(ownerToken, channelId));
     }
 
     [Fact]
@@ -503,6 +485,7 @@ public class MessageTests : IClassFixture<TestWebApplicationFactory>
 
         //assert
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Single(await GetMessages(ownerToken, channelId));
     }
 
     [Fact]
