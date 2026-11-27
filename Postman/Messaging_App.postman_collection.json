@@ -227,6 +227,21 @@
         },
         {
           "name": "Update Password",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();\r",
+                  "pm.collectionVariables.set(\"accessToken\", json.accessToken);\r",
+                  "pm.collectionVariables.set(\"refreshToken\", json.refreshToken);"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
           "request": {
             "method": "PUT",
             "header": [],
@@ -932,6 +947,33 @@
           "response": []
         },
         {
+          "name": "Update Conversation",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"conversationName\": \"Test2\",\r\n  \"iconUrl\": \"https://example.com/image.jpg\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{Messaging_App_HostAddress}}/conversations/{{conversationID}}",
+              "host": [
+                "{{Messaging_App_HostAddress}}"
+              ],
+              "path": [
+                "conversations",
+                "{{conversationID}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
           "name": "Get Conversation Members",
           "request": {
             "method": "GET",
@@ -1016,7 +1058,7 @@
               "query": [
                 {
                   "key": "before",
-                  "value": "{{conversationMessageID}}",
+                  "value": "{{beforeMessageID}}",
                   "type": "text",
                   "disabled": true
                 }
@@ -1283,6 +1325,14 @@
               "path": [
                 "friends",
                 "requests"
+              ],
+              "query": [
+                {
+                  "key": "direction",
+                  "value": "outgoing",
+                  "type": "text",
+                  "disabled": true
+                }
               ]
             }
           },
@@ -1531,6 +1581,21 @@
             },
             {
               "name": "Update Password",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "var json = pm.response.json();\r",
+                      "pm.collectionVariables.set(\"accessToken_B\", json.accessToken);\r",
+                      "pm.collectionVariables.set(\"refreshToken_B\", json.refreshToken);"
+                    ],
+                    "type": "text/javascript",
+                    "packages": {},
+                    "requests": {}
+                  }
+                }
+              ],
               "request": {
                 "method": "PUT",
                 "header": [],
@@ -2236,6 +2301,33 @@
               "response": []
             },
             {
+              "name": "Update Conversation",
+              "request": {
+                "method": "PATCH",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"conversationName\": \"Test2\",\r\n  \"iconUrl\": \"https://example.com/image.jpg\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{Messaging_App_HostAddress}}/conversations/{{conversationID}}",
+                  "host": [
+                    "{{Messaging_App_HostAddress}}"
+                  ],
+                  "path": [
+                    "conversations",
+                    "{{conversationID}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
               "name": "Get Conversation Members",
               "request": {
                 "method": "GET",
@@ -2320,7 +2412,7 @@
                   "query": [
                     {
                       "key": "before",
-                      "value": "{{conversationMessageID}}",
+                      "value": "{{beforeMessageID}}",
                       "type": "text",
                       "disabled": true
                     }
@@ -2587,6 +2679,14 @@
                   "path": [
                     "friends",
                     "requests"
+                  ],
+                  "query": [
+                    {
+                      "key": "direction",
+                      "value": "outgoing",
+                      "type": "text",
+                      "disabled": true
+                    }
                   ]
                 }
               },
