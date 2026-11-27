@@ -102,6 +102,7 @@ builder.Services.AddSingleton<JwtService>();
 builder.Services.AddSingleton<EncryptionService>();
 builder.Services.AddDbContext<MessagingAppContext>(options => options.UseNpgsql(builder.Configuration.GetConnectionString("MessagingAppContext"), options => {options.MapEnum<ActivityStatus>("activitystatus"); options.MapEnum<ConversationType>("conversationtype"); options.MapEnum<FriendStatus>("friendstatus");}));
 builder.Services.AddAuthorization();
+builder.Services.AddHealthChecks().AddDbContextCheck<MessagingAppContext>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ReadStateService>();
 builder.Services.AddScoped<FriendService>();
@@ -133,6 +134,7 @@ app.UseAuthorization();
 
 app.MapControllers();
 app.MapHub<ChatHub>("/hubs/chat");
+app.MapHealthChecks("/health");
 app.Run();
 
 public partial class Program { }
