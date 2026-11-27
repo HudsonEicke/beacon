@@ -1,13 +1,13 @@
 import type { HubConnection } from '@microsoft/signalr';
-import { store } from '@/store/store';
+import type { AppStore } from '@/store/store';
 import { conversationCreated, conversationMemberAdded, conversationMemberRemoved, conversationMessageDeleted, conversationMessageEdited, conversationMessageReceived, conversationOwnerChanged, conversationReadStateUpdated, conversationRemoved, conversationUpdated } from '@/store/hubEvents';
 import { markConversationRead } from '@/store/conversationSlice';
 import { onHubEvent } from '@/services/hub/events';
 
-const isCurrentUser = (username: string) => username === store.getState().user.user?.username;
-
-export const registerConversationEvents = (connection: HubConnection) =>
+export const registerConversationEvents = (connection: HubConnection, store: AppStore) =>
 {
+    const isCurrentUser = (username: string) => username === store.getState().user.user?.username;
+
     onHubEvent(connection, 'ConversationCreated', (conversation) =>
     {
         store.dispatch(conversationCreated({ conversation }));

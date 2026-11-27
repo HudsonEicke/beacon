@@ -1,9 +1,9 @@
 import type { HubConnection } from '@microsoft/signalr';
-import { store } from '@/store/store';
+import type { AppStore } from '@/store/store';
 import { userStatusChanged, userUpdated } from '@/store/hubEvents';
 import { onHubEvent } from '@/services/hub/events';
 
-export const registerUserEvents = (connection: HubConnection) =>
+export const registerUserEvents = (connection: HubConnection, store: AppStore) =>
 {
     onHubEvent(connection, 'UserStatusChanged', (username, status) =>
     {

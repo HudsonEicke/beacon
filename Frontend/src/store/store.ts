@@ -1,4 +1,4 @@
-import { configureStore } from '@reduxjs/toolkit';
+import { combineReducers, configureStore } from '@reduxjs/toolkit';
 import authReducer from './authSlice';
 import userReducer from './userSlice'
 import conversationReducer from './conversationSlice'
@@ -9,19 +9,26 @@ import hubReducer from './hubSlice'
 import readingReducer from './readingSlice'
 import { listenerMiddleware } from './listenerMiddleware';
 
-export const store = configureStore({
-    reducer: {
-        auth: authReducer,
-        user: userReducer,
-        conversation: conversationReducer,
-        server: serverReducer,
-        channel: channelReducer,
-        friend: friendReducer,
-        hub: hubReducer,
-        reading: readingReducer
-    },
+const rootReducer = combineReducers({
+    auth: authReducer,
+    user: userReducer,
+    conversation: conversationReducer,
+    server: serverReducer,
+    channel: channelReducer,
+    friend: friendReducer,
+    hub: hubReducer,
+    reading: readingReducer
+});
+
+// tests build their own store so each one starts from a known state
+export const setupStore = (preloadedState?: Partial<RootState>) => configureStore({
+    reducer: rootReducer,
+    preloadedState,
     middleware: (getDefaultMiddleware) => getDefaultMiddleware().prepend(listenerMiddleware.middleware)
 });
 
-export type RootState = ReturnType<typeof store.getState>
-export type AppDispatch = typeof store.dispatch
+export const store = setupStore();
+
+export type RootState = ReturnType<typeof rootReducer>
+export type AppStore = ReturnType<typeof setupStore>
+export type AppDispatch = AppStore['dispatch']

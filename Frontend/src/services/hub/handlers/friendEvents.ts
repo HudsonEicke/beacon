@@ -1,10 +1,10 @@
 import type { HubConnection } from '@microsoft/signalr';
-import { store } from '@/store/store';
+import type { AppStore } from '@/store/store';
 import { friendAdded, friendRemoved, friendRequestReceived, friendRequestSent, userBlocked, userUnblocked } from '@/store/hubEvents';
 import { onHubEvent } from '@/services/hub/events';
 
 // each of these goes to all of the affected user's tabs, including the one that made the request
-export const registerFriendEvents = (connection: HubConnection) =>
+export const registerFriendEvents = (connection: HubConnection, store: AppStore) =>
 {
     onHubEvent(connection, 'FriendRequestReceived', (user) =>
     {
