@@ -25,7 +25,7 @@ services:
       retries: 10
       start_period: 10s
   api:
-    image: beacon-api
+    image: ghcr.io/hudsoneicke/beacon-api:${BEACON_VERSION:-latest}
     build: ./Backend
     restart: unless-stopped
     logging: *default-logging
@@ -37,7 +37,7 @@ services:
       - JwtSettings__SecretKey=${JWT_SECRET_KEY}
       - EncryptionSettings__SecretKey=${ENCRYPTION_SECRET_KEY}
   web:
-    image: beacon-web
+    image: ghcr.io/hudsoneicke/beacon-web:${BEACON_VERSION:-latest}
     build: ./Frontend
     restart: unless-stopped
     logging: *default-logging
