@@ -1,14 +1,7 @@
 name: Backend
 
 on:
-  push:
-    branches: [ "main" ]
-    paths:
-      - "Backend/**"
-      - "Backend.Tests/**"
-      - "Messaging_App.sln"
-      - "global.json"
-      - ".github/workflows/backend.yml"
+  workflow_call:
   pull_request:
     branches: [ "main" ]
     paths:

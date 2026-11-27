@@ -1,0 +1,102 @@
+name: Deploy
+
+on:
+  push:
+    branches: [ "main" ]
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+      - "Postman/**"
+      - "LICENSE"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# runs one at a time in push order, so an older commit can never finish deploying after a newer one;
+# a run waiting here is replaced by a newer push, which already includes its changes
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  backend:
+    uses: ./.github/workflows/backend.yml
+
+  frontend:
+    uses: ./.github/workflows/frontend.yml
+
+  e2e:
+    uses: ./.github/workflows/e2e.yml
+
+  publish:
+    needs: [ backend, frontend, e2e ]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    permissions:
+      contents: read
+      packages: write
+
+    env:
+      BEACON_VERSION: ${{ github.sha }}
+
+    steps:
+    # actions are pinned to commit SHAs so a moved tag can't change what runs
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - name: Log in to GitHub Container Registry
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: echo "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+    # only api and web: postgres is a public image this repo doesn't publish
+    - name: Build images
+      run: docker compose build api web
+
+    - name: Push images
+      run: |
+        docker compose push api web
+        for service in api web; do
+          image="ghcr.io/hudsoneicke/beacon-$service"
+          docker tag "$image:$BEACON_VERSION" "$image:latest"
+          docker push "$image:latest"
+        done
+
+    - name: Log out
+      if: always()
+      run: docker logout ghcr.io
+
+  deploy:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    environment:
+      name: production
+      url: https://beaconchat.org
+
+    steps:
+    # the key can only run beacon-deploy on the server, which only accepts commits that are on main
+    - name: Set up SSH
+      env:
+        DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+      run: |
+        install -d -m 700 ~/.ssh
+        install -m 600 /dev/null ~/.ssh/deploy_key
+        printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+        printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+    - name: Deploy
+      env:
+        DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+      run: |
+        ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes \
+          "deploy@$DEPLOY_HOST" "$GITHUB_SHA"
+
+    - name: Remove SSH key
+      if: always()
+      run: rm -f ~/.ssh/deploy_key
